@@ -26,14 +26,13 @@ def BM(text: str, pattern: str) -> int:
         if patternIdx >= 0:
             # Mismatch occurred
             currChar = text[txtIdx + patternIdx]
-            
-            # Gunakan .get() untuk menghindari KeyError jika currChar tidak ada di pattern
+    
             lastOccur = badChar.get(currChar, -1)
             shift = max(1, patternIdx - lastOccur)
             txtIdx += shift
         else:
             # Pattern found
             count += 1
-            txtIdx += 1  # Geser 1 jika ingin menangkap overlapping matches
+            txtIdx += 1  
     
     return count
