@@ -5,7 +5,7 @@ import os
 import time
 import sys
 import subprocess
-import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +14,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 try:
     from fileextract import extract_text_from_pdf, split_into_sections, create_flat_text, parse_education_section, parse_experience_section, parse_skills_section
     from kmp import KMP
+    from ahocorasick import AhoCorasick
+    from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY
+    from bm import BM
 except ImportError as e:
     messagebox.showerror("Import Error", f"Tidak dapat mengimpor modul yang dibutuhkan: {e}\nPastikan fileextract.py dan kmp.py ada.")
     sys.exit(1)
@@ -58,6 +61,8 @@ class CVAnalyzerApp:
         kmp_radio.pack(side="left", padx=(0, 10))
         bm_radio = ttk.Radiobutton(algo_options_frame, text="BM", variable=self.search_algo_var, value="BM", style="TRadiobutton")
         bm_radio.pack(side="left")
+        ahoc_radio = ttk.Radiobutton(algo_options_frame, text="Aho-Corasick", variable=self.search_algo_var, value="Aho-Corasick", style="TRadiobutton")
+        ahoc_radio.pack(side="left", padx=(10, 0))
         ttk.Style().configure("TRadiobutton", background="#f0f0f0", font=label_font)
 
         top_matches_label = ttk.Label(input_frame, text="Top Matches:", font=label_font, background="#f0f0f0")
@@ -101,13 +106,71 @@ class CVAnalyzerApp:
         self.results_canvas.configure(scrollregion=self.results_canvas.bbox("all"))
 
     def on_canvas_configure(self, event):
-        """Sesuaikan lebar frame internal dengan lebar canvas."""
         canvas_width = event.width
         self.results_canvas.itemconfig("self.scrollable_card_frame", width=canvas_width)
 
+    def process_cv_worker(db_row_data, parsed_keywords_list, algorithm_choice, aho_automaton_instance=None):
+        cv_path_from_db, first_name, last_name, applicant_id = db_row_data
+        candidate_name = f"{first_name} {last_name}"
+        
+        if not cv_path_from_db:
+            return None
+        
+        actual_cv_path = os.path.abspath(os.path.join(SCRIPT_DIR, cv_path_from_db))
+
+        if not os.path.exists(actual_cv_path):
+            print(f"Skipping non-existent file in worker: {actual_cv_path}")
+            return None
+        
+        try:
+            raw_text = extract_text_from_pdf(actual_cv_path)
+            if not raw_text:
+                return None
+            
+            structured_sections = split_into_sections(raw_text)
+            flat_text = create_flat_text(structured_sections).lower()
+            if not flat_text:
+                return None
+
+            current_cv_matched_keywords_details = []
+            current_cv_total_matches = 0
+
+            if algorithm_choice == "Aho-Corasick":
+                if aho_automaton_instance:
+                    # Panggil Aho-Corasick yang mengembalikan dictionary {keyword: count}
+                    per_keyword_counts = aho_automaton_instance.search(flat_text)
+                    
+                    for keyword, count in per_keyword_counts.items():
+                        if count > 0:
+                            current_cv_matched_keywords_details.append(
+                                f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
+                            )
+                            current_cv_total_matches += count
+            else: # KMP atau BM
+                for keyword in parsed_keywords_list:
+                    count = 0
+                    if algorithm_choice == "KMP":
+                        count = KMP(flat_text, keyword)
+                    elif algorithm_choice == "BM":
+                        count = BM(flat_text, keyword)
+                    if count > 0:
+                        current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
+                        current_cv_total_matches += count
+            
+            if current_cv_total_matches > 0:
+                return {
+                    "id": applicant_id,
+                    "name": candidate_name, 
+                    "total_matches": current_cv_total_matches,
+                    "matched_keywords": current_cv_matched_keywords_details, 
+                    "cv_path": cv_path_from_db
+                }
+            return None
+        except Exception as e:
+            print(f"Error processing CV {actual_cv_path} (ID: {applicant_id}) in worker: {e}")
+            return None
 
     def perform_search(self):
-
         keywords_str = self.keywords_entry.get()
         algorithm = self.search_algo_var.get()
         try:
@@ -130,6 +193,13 @@ class CVAnalyzerApp:
         num_cvs_from_db = 0
         start_time = time.time()
 
+        main_aho_automaton = None
+        if algorithm == "Aho-Corasick":
+            if not parsed_keywords:
+                messagebox.showwarning("Input Error", "No valid keywords entered for Aho-Corasick.")
+                return
+            main_aho_automaton = AhoCorasick(parsed_keywords)
+
         try:
             conn = mysql.connector.connect(
                 host="localhost", user="root", password="admin", database="datastima" 
@@ -138,59 +208,62 @@ class CVAnalyzerApp:
             query = "SELECT cv_path, first_name, last_name, ad.applicant_id FROM applicationdetail ad JOIN applicantprofile ap ON ap.applicant_id=ad.applicant_id;"
             cursor.execute(query)
             db_rows = cursor.fetchall()
-            num_cvs_from_db = len(db_rows)
+            db_rows_decrypted = []
+            for row in db_rows:
+                cv_path_value = row[0]
+                first_name_value = row[1]
+                last_name_value = row[2]
+                applicant_id_value = row[3]
+                first_name_dec = xor_decrypt_data(first_name_value, ENCRYPTION_KEY)
+                last_name_dec = xor_decrypt_data(last_name_value, ENCRYPTION_KEY)
+                db_rows_decrypted.append(
+                    (cv_path_value, first_name_dec, last_name_dec, applicant_id_value)
+                )
+            num_cvs_from_db = len(db_rows_decrypted)
 
-            for db_row in db_rows:
-                cv_path_from_db = db_row[0]
-                candidate_name = db_row[1] +" "+ db_row[2]
-                id = db_row[3]
-
-                if not cv_path_from_db: continue
+            if not db_rows_decrypted:
+                messagebox.showinfo("Info", "No CV data found in the database.")
+                if hasattr(self, 'scan_info_label'):
+                    self.scan_info_label.config(text="No CVs to process.")
+                return
+            
+            num_workers = (os.cpu_count() or 2) * 2 
+            
+            futures = []
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                for db_row_tuple in db_rows_decrypted:
+                    future = executor.submit(
+                        CVAnalyzerApp.process_cv_worker,
+                        db_row_tuple, 
+                        parsed_keywords, 
+                        algorithm,
+                        main_aho_automaton # Akan None jika bukan Aho-Corasick
+                    )
+                    futures.append(future)
                 
-                actual_cv_path = os.path.abspath(os.path.join(SCRIPT_DIR, cv_path_from_db))
-
-                if not os.path.exists(actual_cv_path):
-                    print(f"Skipping non-existent file: {actual_cv_path}")
-                    continue
-                
-                try:
-                    raw_text = extract_text_from_pdf(actual_cv_path)
-                    if not raw_text: continue
-                    
-                    structured_sections = split_into_sections(raw_text)
-                    flat_text = create_flat_text(structured_sections).lower()
-                    if not flat_text: continue
-
-                    current_cv_matched_keywords_details = []
-                    current_cv_total_matches = 0
-
-                    for keyword in parsed_keywords:
-                        if algorithm == "KMP":
-                            count = KMP(flat_text, keyword)
-                        elif algorithm == "BM":
-                            count = KMP(flat_text, keyword) #BM belum ada
-                        
-                        if count > 0:
-                            current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
-                            current_cv_total_matches += count
-                    
-                    if current_cv_total_matches > 0:
-                        all_cv_results.append({
-                            "id": id,
-                            "name": candidate_name, 
-                            "total_matches": current_cv_total_matches,
-                            "matched_keywords": current_cv_matched_keywords_details, 
-                            "cv_path": cv_path_from_db
-                        })
-                except Exception as e:
-                    print(f"Error processing CV {actual_cv_path}: {e}")
+                for i, future_result in enumerate(as_completed(futures)):
+                    try:
+                        result = future_result.result() 
+                        if result:
+                            all_cv_results.append(result)
+                    except Exception as e_thread:
+                        print(f"Error retrieving result from a worker thread: {e_thread}")
+            
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"MySQL Error: {err}")
-            self.scan_info_label.config(text=f"Database connection failed.")
+            if hasattr(self, 'scan_info_label'):
+                self.scan_info_label.config(text=f"Database connection failed.")
+            return
+        except Exception as e_main: 
+            messagebox.showerror("Processing Error", f"An unexpected error occurred: {e_main}")
+            if hasattr(self, 'scan_info_label'):
+                self.scan_info_label.config(text=f"Processing error.")
+            print(f"Main thread processing error: {e_main}")
             return
         finally:
             if conn and conn.is_connected():
-                cursor.close()
+                if 'cursor' in locals() and cursor: 
+                    cursor.close()
                 conn.close()
 
         all_cv_results.sort(key=lambda x: x["total_matches"], reverse=True)
@@ -198,9 +271,14 @@ class CVAnalyzerApp:
         end_time = time.time()
         processing_time = round((end_time - start_time) * 1000)
 
-        self.scan_info_label.config(text=f"{num_cvs_from_db} CVs processed. Took {processing_time}ms")
-        self.scan_info_label.pack(pady=(0,5)) 
-        self.display_results(top_results_to_display)
+        if hasattr(self, 'scan_info_label'):
+            self.scan_info_label.config(text=f"{num_cvs_from_db} CVs processed ({len(all_cv_results)} having matches). Took {processing_time}ms")
+            self.scan_info_label.pack(pady=(0,5)) 
+        if hasattr(self, 'display_results'):
+            self.display_results(top_results_to_display)
+        else:
+            print("Display results function not found.") # Fallback jika display_results tidak ada
+            print(top_results_to_display)
 
 
     def display_results(self, results_data):
@@ -270,20 +348,13 @@ class CVAnalyzerApp:
             return
 
         biodata = {"name": candidate_name, "birthdate": "N/A", "address": "N/A", "phone": "N/A"}
-        conn = None
         try:
-            conn = mysql.connector.connect(
-                host="localhost", user="root", password="admin", database="datastima" 
-            )
-            cursor = conn.cursor(dictionary=True)
-            query = "SELECT date_of_birth, address, phone_number FROM applicantprofile WHERE applicant_id = %s" # Gunakan applicant_id
-            cursor.execute(query, (applicant_id,))
-            profile = cursor.fetchone()
+            profile = get_profile_by_id(applicant_id)
             if profile:
                 birthdate_db = profile.get('date_of_birth')
                 if birthdate_db:
                     try:
-                        biodata['birthdate'] = birthdate_db.strftime('%Y-%m-%d')
+                        biodata['birthdate'] = birthdate_db
                     except AttributeError:
                         biodata['birthdate'] = str(birthdate_db)
                 biodata['address'] = profile.get('address', "N/A")
@@ -291,10 +362,6 @@ class CVAnalyzerApp:
         except mysql.connector.Error as err:
             print(f"Database error fetching profile for {candidate_name}: {err}")
             messagebox.showwarning("Database Info", f"Could not fetch detailed biodata for {candidate_name}.")
-        finally:
-            if conn and conn.is_connected():
-                cursor.close()
-                conn.close()
 
         parsed_skills_list = []
         parsed_experience_entries = []
