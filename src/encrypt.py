@@ -45,9 +45,9 @@ def get_db_connection():
     try:
         conn = mysql.connector.connect(
             host="localhost",       
-            user="root",            
-            password="admin",       
-            database="datastima"    
+            user="", # Ganti dengan username MySQL           
+            password="", # Ganti dengan password MySQL       
+            database="" # Ganti dengan nama database    
         )
         return conn
     except mysql.connector.Error as err:

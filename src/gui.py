@@ -15,7 +15,7 @@ try:
     from fileextract import extract_text_from_pdf, split_into_sections, create_flat_text, parse_education_section, parse_experience_section, parse_skills_section
     from kmp import KMP
     from ahocorasick import AhoCorasick
-    from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY
+    from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY, get_db_connection
     from bm import BM
 except ImportError as e:
     messagebox.showerror("Import Error", f"Tidak dapat mengimpor modul yang dibutuhkan: {e}\nPastikan fileextract.py dan kmp.py ada.")
@@ -201,9 +201,7 @@ class CVAnalyzerApp:
             main_aho_automaton = AhoCorasick(parsed_keywords)
 
         try:
-            conn = mysql.connector.connect(
-                host="localhost", user="root", password="admin", database="datastima" 
-            )
+            conn = get_db_connection()
             cursor = conn.cursor()
             query = "SELECT cv_path, first_name, last_name, ad.applicant_id FROM applicationdetail ad JOIN applicantprofile ap ON ap.applicant_id=ad.applicant_id;"
             cursor.execute(query)
