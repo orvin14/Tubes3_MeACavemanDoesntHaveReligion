@@ -54,13 +54,13 @@ def get_db_connection():
         print(f"Error koneksi ke MySQL: {err}")
         return None
     
-def get_profile_by_id(applicant_id):
+def get_profile_by_id(applicant_id, decrypt=True):
     conn = get_db_connection()
     if conn is None:
         return None
         
     cursor = None
-    profil_didekripsi = None
+    profile_data = None
     try:
         cursor = conn.cursor(dictionary=True) 
         query_select = """
@@ -69,29 +69,37 @@ def get_profile_by_id(applicant_id):
             WHERE applicant_id = %s
         """
         cursor.execute(query_select, (applicant_id,))
-        row_encrypted = cursor.fetchone() 
+        row_data = cursor.fetchone() 
         
-        if row_encrypted:
-            first_name_dec = xor_decrypt_data(row_encrypted["first_name"], ENCRYPTION_KEY)
-            last_name_dec = xor_decrypt_data(row_encrypted["last_name"], ENCRYPTION_KEY)
-            date_of_birth_dec = xor_decrypt_data(row_encrypted["date_of_birth"], ENCRYPTION_KEY)
-            if date_of_birth_dec:
+        if row_data:
+            if decrypt:
+                first_name_processed = xor_decrypt_data(row_data["first_name"], ENCRYPTION_KEY)
+                last_name_processed = xor_decrypt_data(row_data["last_name"], ENCRYPTION_KEY)
+                date_of_birth_processed_str = xor_decrypt_data(row_data["date_of_birth"], ENCRYPTION_KEY)
+                address_processed = xor_decrypt_data(row_data["address"], ENCRYPTION_KEY)
+                phone_number_processed = xor_decrypt_data(row_data["phone_number"], ENCRYPTION_KEY)
+            else:
+                first_name_processed = row_data["first_name"]
+                last_name_processed = row_data["last_name"]
+                date_of_birth_processed_str = str(row_data["date_of_birth"]) 
+                address_processed = row_data["address"]
+                phone_number_processed = row_data["phone_number"]
+
+            date_of_birth_obj = None
+            if date_of_birth_processed_str and date_of_birth_processed_str != 'None':
                 try:
-                    date_of_birth_obj = datetime.strptime(date_of_birth_dec, '%Y-%m-%d').date()
-                    # Sekarang date_of_birth_obj adalah objek datetime.date
-                except ValueError:
-                    print(f"Format tanggal tidak valid setelah dekripsi: {date_of_birth_dec}")
-                    date_of_birth_obj = None 
-            address_dec = xor_decrypt_data(row_encrypted["address"], ENCRYPTION_KEY)
-            phone_number_dec = xor_decrypt_data(row_encrypted["phone_number"], ENCRYPTION_KEY)
+                    date_of_birth_obj = datetime.strptime(date_of_birth_processed_str, '%Y-%m-%d').date()
+                except (ValueError, TypeError):
+                    print(f"Format tanggal tidak valid: {date_of_birth_processed_str}")
+                    date_of_birth_obj = date_of_birth_processed_str 
             
-            profil_didekripsi = {
-                "applicant_id": row_encrypted["applicant_id"], # ID tidak dienkripsi
-                "first_name": first_name_dec, 
-                "last_name": last_name_dec,
+            profile_data = {
+                "applicant_id": row_data["applicant_id"],
+                "first_name": first_name_processed, 
+                "last_name": last_name_processed,
                 "date_of_birth": date_of_birth_obj,
-                "address": address_dec, 
-                "phone_number": phone_number_dec
+                "address": address_processed, 
+                "phone_number": phone_number_processed
             }
         else:
             print(f"Profil untuk Applicant ID '{applicant_id}' tidak ditemukan.")
@@ -105,7 +113,7 @@ def get_profile_by_id(applicant_id):
             cursor.close()
         if conn and conn.is_connected():
             conn.close()
-    return profil_didekripsi
+    return profile_data
 
 def encrypt_database():
     conn = get_db_connection()

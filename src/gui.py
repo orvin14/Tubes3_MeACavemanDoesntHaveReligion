@@ -70,6 +70,15 @@ class CVAnalyzerApp:
         self.top_matches_spinbox = ttk.Spinbox(input_frame, from_=1, to=20, width=5, font=label_font)
         self.top_matches_spinbox.grid(row=2, column=1, padx=5, pady=5, sticky="w")
         self.top_matches_spinbox.set("3")
+
+        self.use_encryption_var = tk.BooleanVar(value=True)
+        encrypt_check = ttk.Checkbutton(
+            input_frame, 
+            text="Database Terenkripsi", 
+            variable=self.use_encryption_var, 
+            style="TRadiobutton"
+        )
+        encrypt_check.grid(row=3, column=0, columnspan=2, padx=0, pady=5, sticky="w")
         input_frame.columnconfigure(1, weight=1)
 
 
@@ -173,6 +182,7 @@ class CVAnalyzerApp:
     def perform_search(self):
         keywords_str = self.keywords_entry.get()
         algorithm = self.search_algo_var.get()
+        use_encryption = self.use_encryption_var.get()
         try:
             top_n = int(self.top_matches_spinbox.get())
         except ValueError:
@@ -212,10 +222,11 @@ class CVAnalyzerApp:
                 first_name_value = row[1]
                 last_name_value = row[2]
                 applicant_id_value = row[3]
-                first_name_dec = xor_decrypt_data(first_name_value, ENCRYPTION_KEY)
-                last_name_dec = xor_decrypt_data(last_name_value, ENCRYPTION_KEY)
+                if use_encryption:
+                    first_name_value = xor_decrypt_data(first_name_value, ENCRYPTION_KEY)
+                    last_name_value = xor_decrypt_data(last_name_value, ENCRYPTION_KEY)
                 db_rows_decrypted.append(
-                    (cv_path_value, first_name_dec, last_name_dec, applicant_id_value)
+                    (cv_path_value, first_name_value, last_name_value, applicant_id_value)
                 )
             num_cvs_from_db = len(db_rows_decrypted)
 
@@ -344,10 +355,10 @@ class CVAnalyzerApp:
         if not os.path.exists(actual_cv_path):
             messagebox.showerror("Error", f"CV file not found at: {actual_cv_path}")
             return
-
+        perlu_decrypt = self.use_encryption_var.get()
         biodata = {"name": candidate_name, "birthdate": "N/A", "address": "N/A", "phone": "N/A"}
         try:
-            profile = get_profile_by_id(applicant_id)
+            profile = get_profile_by_id(applicant_id, decrypt=perlu_decrypt)
             if profile:
                 birthdate_db = profile.get('date_of_birth')
                 if birthdate_db:
