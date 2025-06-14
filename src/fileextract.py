@@ -205,6 +205,3 @@ def parse_skills_section(skills_text_block):
     
     unique_skills = sorted(list(set(s for s in skills if s)), key=lambda s: s.lower()) # Urutkan agar konsisten
     return unique_skills
-
-
-

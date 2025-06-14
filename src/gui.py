@@ -17,6 +17,7 @@ try:
     from ahocorasick import AhoCorasick
     from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY, get_db_connection
     from bm import BM
+    from levenshtein import levenshteinDistance, levenshteinSearchWithMatchedWords
 except ImportError as e:
     messagebox.showerror("Import Error", f"Tidak dapat mengimpor modul yang dibutuhkan: {e}\nPastikan fileextract.py dan kmp.py ada.")
     sys.exit(1)
@@ -26,7 +27,7 @@ class CVAnalyzerApp:
     def __init__(self, master):
         self.master = master
         master.title("CV Analyzer App")
-        master.geometry("850x750") 
+        master.geometry("850x750")
         master.configure(bg="#f0f0f0")
 
         title_font = ("Arial", 18, "bold")
@@ -48,27 +49,35 @@ class CVAnalyzerApp:
         keywords_label = ttk.Label(input_frame, text="Keywords:", font=label_font, background="#f0f0f0")
         keywords_label.grid(row=0, column=0, padx=(0,10), pady=5, sticky="w")
         self.keywords_entry = ttk.Entry(input_frame, width=60, font=label_font)
-        self.keywords_entry.grid(row=0, column=1, columnspan=3, padx=5, pady=5, sticky="ew")
+        self.keywords_entry.grid(row=0, column=1, columnspan=5, padx=5, pady=5, sticky="ew")
         self.keywords_entry.insert(0, "React, Express, HTML")
 
         algo_label = ttk.Label(input_frame, text="Search Algorithm:", font=label_font, background="#f0f0f0")
         algo_label.grid(row=1, column=0, padx=(0,10), pady=5, sticky="w")
         
         algo_options_frame = ttk.Frame(input_frame, style="Input.TFrame")
-        algo_options_frame.grid(row=1, column=1, sticky="w")
+        algo_options_frame.grid(row=1, column=1, columnspan=3, sticky="w")
         self.search_algo_var = tk.StringVar(value="KMP")
+        self.search_algo_var.trace_add("write", self.toggle_levenshtein_threshold)
+
         kmp_radio = ttk.Radiobutton(algo_options_frame, text="KMP", variable=self.search_algo_var, value="KMP", style="TRadiobutton")
         kmp_radio.pack(side="left", padx=(0, 10))
         bm_radio = ttk.Radiobutton(algo_options_frame, text="BM", variable=self.search_algo_var, value="BM", style="TRadiobutton")
         bm_radio.pack(side="left")
+        lev_radio = ttk.Radiobutton(algo_options_frame, text="Levenshtein", variable=self.search_algo_var, value="Levenshtein", style="TRadiobutton")
+        lev_radio.pack(side="left", padx=(10, 0))
         ahoc_radio = ttk.Radiobutton(algo_options_frame, text="Aho-Corasick", variable=self.search_algo_var, value="Aho-Corasick", style="TRadiobutton")
         ahoc_radio.pack(side="left", padx=(10, 0))
         ttk.Style().configure("TRadiobutton", background="#f0f0f0", font=label_font)
 
+        self.levenshtein_threshold_label = ttk.Label(input_frame, text="Levenshtein Threshold:", font=label_font, background="#f0f0f0")
+        self.levenshtein_threshold_entry = ttk.Spinbox(input_frame, from_=0, to=5, width=5, font=label_font)
+        self.levenshtein_threshold_entry.set("0")
+
         top_matches_label = ttk.Label(input_frame, text="Top Matches:", font=label_font, background="#f0f0f0")
-        top_matches_label.grid(row=2, column=0, padx=(0,10), pady=5, sticky="w")
+        top_matches_label.grid(row=2, column=0, padx=(0,10), pady=5, sticky="w") 
         self.top_matches_spinbox = ttk.Spinbox(input_frame, from_=1, to=20, width=5, font=label_font)
-        self.top_matches_spinbox.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        self.top_matches_spinbox.grid(row=2, column=1, padx=5, pady=5, sticky="w") 
         self.top_matches_spinbox.set("3")
 
         self.use_encryption_var = tk.BooleanVar(value=True)
@@ -78,7 +87,7 @@ class CVAnalyzerApp:
             variable=self.use_encryption_var, 
             style="TRadiobutton"
         )
-        encrypt_check.grid(row=3, column=0, columnspan=2, padx=0, pady=5, sticky="w")
+        encrypt_check.grid(row=3, column=0, columnspan=2, padx=0, pady=5, sticky="w") 
         input_frame.columnconfigure(1, weight=1)
 
 
@@ -97,11 +106,10 @@ class CVAnalyzerApp:
         results_title_label.pack(pady=(0,5))
         self.scan_info_label = ttk.Label(top_info_frame, text="", font=label_font, background="#f0f0f0")
         
-
         self.results_canvas = tk.Canvas(results_frame_container, borderwidth=0, background="#e0e0e0")
         self.scrollbar_y = ttk.Scrollbar(results_frame_container, orient="vertical", command=self.results_canvas.yview)
         self.results_canvas.configure(yscrollcommand=self.scrollbar_y.set)
-        self.scrollbar_y.pack(side="right", fill="y") # scrollbar
+        self.scrollbar_y.pack(side="right", fill="y") 
         self.results_canvas.pack(side="left", fill="both", expand=True)
         self.scrollable_card_frame = ttk.Frame(self.results_canvas, style="ResultsDisplay.TFrame")
         ttk.Style().configure("ResultsDisplay.TFrame", background="#e0e0e0")
@@ -109,6 +117,15 @@ class CVAnalyzerApp:
         self.scrollable_card_frame.bind("<Configure>", self.on_frame_configure)
         self.results_canvas.bind("<Configure>", self.on_canvas_configure)
 
+        self.toggle_levenshtein_threshold()
+
+    def toggle_levenshtein_threshold(self, *args):
+        if self.search_algo_var.get() == "Levenshtein":
+            self.levenshtein_threshold_label.grid(row=1, column=4, padx=(0,5), pady=5, sticky="w")
+            self.levenshtein_threshold_entry.grid(row=1, column=5, padx=5, pady=5, sticky="w")
+        else:
+            self.levenshtein_threshold_label.grid_remove()
+            self.levenshtein_threshold_entry.grid_remove()
 
     def on_frame_configure(self, event=None):
         """Update scrollregion canvas agar sesuai dengan ukuran konten."""
@@ -118,7 +135,7 @@ class CVAnalyzerApp:
         canvas_width = event.width
         self.results_canvas.itemconfig("self.scrollable_card_frame", width=canvas_width)
 
-    def process_cv_worker(db_row_data, parsed_keywords_list, algorithm_choice, aho_automaton_instance=None):
+    def process_cv_worker(db_row_data, parsed_keywords_list, algorithm_choice, aho_automaton_instance=None, levenshtein_threshold=0):
         cv_path_from_db, first_name, last_name, applicant_id = db_row_data
         candidate_name = f"{first_name} {last_name}"
         
@@ -155,17 +172,30 @@ class CVAnalyzerApp:
                                 f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
                             )
                             current_cv_total_matches += count
-            else: # KMP atau BM
-                for keyword in parsed_keywords_list:
+            else:
+
+                for keyword_pattern in parsed_keywords_list:
                     count = 0
+                    matched_words_for_this_keyword = [] # levenshtein
+
                     if algorithm_choice == "KMP":
-                        count = KMP(flat_text, keyword)
+                        count = KMP(flat_text, keyword_pattern) 
                     elif algorithm_choice == "BM":
-                        count = BM(flat_text, keyword)
+                        count = BM(flat_text, keyword_pattern)
+                    elif algorithm_choice == "Levenshtein":
+                        count, matched_words_for_this_keyword = \
+                            levenshteinSearchWithMatchedWords(flat_text, keyword_pattern, levenshtein_threshold)
+
                     if count > 0:
-                        current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
+                        details_string = f"{keyword_pattern.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
+
+                        if algorithm_choice == "Levenshtein" and matched_words_for_this_keyword:
+                            unique_matched_display = sorted(list(set(matched_words_for_this_keyword)))
+                            details_string += f" (kata cocok: {', '.join(unique_matched_display)})"
+
+                        current_cv_matched_keywords_details.append(details_string)
                         current_cv_total_matches += count
-            
+                
             if current_cv_total_matches > 0:
                 return {
                     "id": applicant_id,
@@ -181,8 +211,13 @@ class CVAnalyzerApp:
 
     def perform_search(self):
         keywords_str = self.keywords_entry.get()
+        search_algo = self.search_algo_var.get()
         algorithm = self.search_algo_var.get()
         use_encryption = self.use_encryption_var.get()
+        levenshtein_threshold = 0
+
+        if search_algo == "Levenshtein":
+            levenshtein_threshold = int(self.levenshtein_threshold_entry.get())
         try:
             top_n = int(self.top_matches_spinbox.get())
         except ValueError:
@@ -246,7 +281,8 @@ class CVAnalyzerApp:
                         db_row_tuple, 
                         parsed_keywords, 
                         algorithm,
-                        main_aho_automaton # Akan None jika bukan Aho-Corasick
+                        main_aho_automaton, # Akan None jika bukan Aho-Corasick
+                        levenshtein_threshold=levenshtein_threshold
                     )
                     futures.append(future)
                 
