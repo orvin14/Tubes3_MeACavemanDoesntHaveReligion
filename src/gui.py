@@ -157,7 +157,7 @@ class CVAnalyzerApp:
                             current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
                             current_cv_total_matches += count
                     
-                    else:
+                    if count == 0:
                         for keyword_pattern in parsed_keywords_list:
                             start_fuzzy = time.time()
                             fuzzy_count, matched_words = dynamicLevenshteinSearch(flat_text, keyword_pattern)
