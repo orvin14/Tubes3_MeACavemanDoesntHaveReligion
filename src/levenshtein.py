@@ -25,24 +25,24 @@ def levenshteinDistance(s1: str, s2: str) -> int:
     # Hasil akhir ada di pojok kanan bawah matriks
     return dp[m][n]
 
-def levenshteinSearch(text: str, pattern: str, threshold: int = 1) -> int:
-    words = text.split()
-    count = 0
-    for word in words:
-        if levenshteinDistance(word, pattern) <= threshold:
-            count += 1
+# def levenshteinSearch(text: str, pattern: str, threshold: int = 1) -> int:
+#     words = text.split()
+#     count = 0
+#     for word in words:
+#         if levenshteinDistance(word, pattern) <= threshold:
+#             count += 1
             
-    return count
+#     return count
 
-def levenshteinSearchWithMatchedWords(text: str, pattern: str, threshold: int = 1) -> tuple[int, list[str]]:
-    words = text.split()
-    count = 0
-    matched_words = []
-    for word in words:
-        if levenshteinDistance(word, pattern) <= threshold:
-            count += 1
-            matched_words.append(word) # Tambahkan kata yang cocok
-    return count, matched_words
+# def levenshteinSearchWithMatchedWords(text: str, pattern: str, threshold: int = 1) -> tuple[int, list[str]]:
+#     words = text.split()
+#     count = 0
+#     matched_words = []
+#     for word in words:
+#         if levenshteinDistance(word, pattern) <= threshold:
+#             count += 1
+#             matched_words.append(word) # Tambahkan kata yang cocok
+#     return count, matched_words
 
 def dynamicLevenshteinSearch(text: str, pattern: str, tolerance_percent: float = 0.15, max_edits: int = 3) -> tuple[int, list[str]]:
     # Hitung ambang batas (allowed_edits) secara dinamis
