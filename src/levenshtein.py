@@ -44,7 +44,7 @@ def levenshteinSearchWithMatchedWords(text: str, pattern: str, threshold: int = 
             matched_words.append(word) # Tambahkan kata yang cocok
     return count, matched_words
 
-def dynamicLevenshteinSearch(text: str, pattern: str, tolerance_percent: float = 0.15, max_edits: int = 2) -> tuple[int, list[str]]:
+def dynamicLevenshteinSearch(text: str, pattern: str, tolerance_percent: float = 0.15, max_edits: int = 3) -> tuple[int, list[str]]:
     # Hitung ambang batas (allowed_edits) secara dinamis
     patternLen = len(pattern)
     if patternLen == 0:

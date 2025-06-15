@@ -71,7 +71,7 @@ class CVAnalyzerApp:
 
         top_matches_label = ttk.Label(input_frame, text="Top Matches:", font=label_font, background="#f0f0f0")
         top_matches_label.grid(row=2, column=0, padx=(0,10), pady=5, sticky="w") 
-        self.top_matches_spinbox = ttk.Spinbox(input_frame, from_=1, to=20, width=5, font=label_font)
+        self.top_matches_spinbox = ttk.Spinbox(input_frame, from_=1, to=100, width=5, font=label_font)
         self.top_matches_spinbox.grid(row=2, column=1, padx=5, pady=5, sticky="w") 
         self.top_matches_spinbox.set("3")
 
@@ -120,7 +120,7 @@ class CVAnalyzerApp:
         canvas_width = event.width
         self.results_canvas.itemconfig("self.scrollable_card_frame", width=canvas_width)
 
-    def process_cv_worker(db_row_data, parsed_keywords_list, algorithm_choice, aho_automaton_instance=None, levenshtein_threshold=0):
+    def process_cv_worker(db_row_data, parsed_keywords_list, algorithm_choice, aho_automaton_instance=None):
         cv_path_from_db, first_name, last_name, applicant_id = db_row_data
         candidate_name = f"{first_name} {last_name}"
         
@@ -156,6 +156,22 @@ class CVAnalyzerApp:
                             has_exact_match = True # Aho-Corasick adalah exact match
                             current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
                             current_cv_total_matches += count
+                    
+                    else:
+                        for keyword_pattern in parsed_keywords_list:
+                            start_fuzzy = time.time()
+                            fuzzy_count, matched_words = dynamicLevenshteinSearch(flat_text, keyword_pattern)
+                            end_fuzzy = time.time()
+                            total_fuzzy_duration_s += (end_fuzzy - start_fuzzy)
+                            
+                            if fuzzy_count > 0:
+                                details_string = f"{keyword_pattern.capitalize()} (fuzzy): {fuzzy_count} occurrence{'s' if fuzzy_count > 1 else ''}"
+                                if matched_words:
+                                    unique_matched_display = sorted(list(set(matched_words)))
+                                    details_string += f" (kata cocok: {', '.join(unique_matched_display)})"
+                                current_cv_matched_keywords_details.append(details_string)
+                                current_cv_total_matches += fuzzy_count
+
             else:
                 for keyword_pattern in parsed_keywords_list:
                     count = 0
@@ -173,7 +189,7 @@ class CVAnalyzerApp:
                         details_string = f"{keyword_pattern.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
                         current_cv_matched_keywords_details.append(details_string)
                         current_cv_total_matches += count
-                    elif count == 0:
+                    else: # Jika tidak ada exact match, coba fuzzy search
                         start_fuzzy = time.time()
                         fuzzy_count, matched_words = dynamicLevenshteinSearch(flat_text, keyword_pattern)
                         end_fuzzy = time.time()

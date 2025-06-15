@@ -44,8 +44,8 @@ def xor_decrypt_data(ciphertext_base64_str, key_str):
 def get_db_connection():
     try:
         conn = mysql.connector.connect(
-            host="",       
-            user="", # Ganti dengan username MySQL           
+            host="localhost",       
+            user="root", # Ganti dengan username MySQL           
             password="", # Ganti dengan password MySQL       
             database="" # Ganti dengan nama database    
         )
