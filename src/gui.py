@@ -17,7 +17,7 @@ try:
     from ahocorasick import AhoCorasick
     from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY, get_db_connection
     from bm import BM
-    from levenshtein import levenshteinDistance, levenshteinSearchWithMatchedWords
+    from levenshtein import levenshteinDistance, levenshteinSearchWithMatchedWords, dynamicLevenshteinSearch
 except ImportError as e:
     messagebox.showerror("Import Error", f"Tidak dapat mengimpor modul yang dibutuhkan: {e}\nPastikan fileextract.py dan kmp.py ada.")
     sys.exit(1)
@@ -58,21 +58,16 @@ class CVAnalyzerApp:
         algo_options_frame = ttk.Frame(input_frame, style="Input.TFrame")
         algo_options_frame.grid(row=1, column=1, columnspan=3, sticky="w")
         self.search_algo_var = tk.StringVar(value="KMP")
-        self.search_algo_var.trace_add("write", self.toggle_levenshtein_threshold)
+        # self.search_algo_var.trace_add("write", self.toggle_levenshtein_threshold)
 
         kmp_radio = ttk.Radiobutton(algo_options_frame, text="KMP", variable=self.search_algo_var, value="KMP", style="TRadiobutton")
         kmp_radio.pack(side="left", padx=(0, 10))
         bm_radio = ttk.Radiobutton(algo_options_frame, text="BM", variable=self.search_algo_var, value="BM", style="TRadiobutton")
         bm_radio.pack(side="left")
-        lev_radio = ttk.Radiobutton(algo_options_frame, text="Levenshtein", variable=self.search_algo_var, value="Levenshtein", style="TRadiobutton")
-        lev_radio.pack(side="left", padx=(10, 0))
         ahoc_radio = ttk.Radiobutton(algo_options_frame, text="Aho-Corasick", variable=self.search_algo_var, value="Aho-Corasick", style="TRadiobutton")
         ahoc_radio.pack(side="left", padx=(10, 0))
         ttk.Style().configure("TRadiobutton", background="#f0f0f0", font=label_font)
 
-        self.levenshtein_threshold_label = ttk.Label(input_frame, text="Levenshtein Threshold:", font=label_font, background="#f0f0f0")
-        self.levenshtein_threshold_entry = ttk.Spinbox(input_frame, from_=0, to=5, width=5, font=label_font)
-        self.levenshtein_threshold_entry.set("0")
 
         top_matches_label = ttk.Label(input_frame, text="Top Matches:", font=label_font, background="#f0f0f0")
         top_matches_label.grid(row=2, column=0, padx=(0,10), pady=5, sticky="w") 
@@ -117,16 +112,6 @@ class CVAnalyzerApp:
         self.scrollable_card_frame.bind("<Configure>", self.on_frame_configure)
         self.results_canvas.bind("<Configure>", self.on_canvas_configure)
 
-        self.toggle_levenshtein_threshold()
-
-    def toggle_levenshtein_threshold(self, *args):
-        if self.search_algo_var.get() == "Levenshtein":
-            self.levenshtein_threshold_label.grid(row=1, column=4, padx=(0,5), pady=5, sticky="w")
-            self.levenshtein_threshold_entry.grid(row=1, column=5, padx=5, pady=5, sticky="w")
-        else:
-            self.levenshtein_threshold_label.grid_remove()
-            self.levenshtein_threshold_entry.grid_remove()
-
     def on_frame_configure(self, event=None):
         """Update scrollregion canvas agar sesuai dengan ukuran konten."""
         self.results_canvas.configure(scrollregion=self.results_canvas.bbox("all"))
@@ -139,70 +124,82 @@ class CVAnalyzerApp:
         cv_path_from_db, first_name, last_name, applicant_id = db_row_data
         candidate_name = f"{first_name} {last_name}"
         
-        if not cv_path_from_db:
-            return None
-        
+        if not cv_path_from_db: return None
         actual_cv_path = os.path.abspath(os.path.join(SCRIPT_DIR, cv_path_from_db))
-
-        if not os.path.exists(actual_cv_path):
-            print(f"Skipping non-existent file in worker: {actual_cv_path}")
-            return None
+        if not os.path.exists(actual_cv_path): return None
         
         try:
             raw_text = extract_text_from_pdf(actual_cv_path)
-            if not raw_text:
-                return None
+            if not raw_text: return None
             
             structured_sections = split_into_sections(raw_text)
             flat_text = create_flat_text(structured_sections).lower()
-            if not flat_text:
-                return None
+            if not flat_text: return None
 
             current_cv_matched_keywords_details = []
             current_cv_total_matches = 0
+            total_exact_duration_s = 0.0
+            total_fuzzy_duration_s = 0.0
+            
+            # === PERUBAHAN 1: Tambahkan flag untuk melacak exact match ===
+            has_exact_match = False
 
             if algorithm_choice == "Aho-Corasick":
                 if aho_automaton_instance:
-                    # Panggil Aho-Corasick yang mengembalikan dictionary {keyword: count}
+                    start_time = time.time()
                     per_keyword_counts = aho_automaton_instance.search(flat_text)
+                    end_time = time.time()
+                    total_exact_duration_s = end_time - start_time
                     
                     for keyword, count in per_keyword_counts.items():
                         if count > 0:
-                            current_cv_matched_keywords_details.append(
-                                f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
-                            )
+                            has_exact_match = True # Aho-Corasick adalah exact match
+                            current_cv_matched_keywords_details.append(f"{keyword.capitalize()}: {count} occurrence{'s' if count > 1 else ''}")
                             current_cv_total_matches += count
             else:
-
                 for keyword_pattern in parsed_keywords_list:
                     count = 0
-                    matched_words_for_this_keyword = [] # levenshtein
-
-                    if algorithm_choice == "KMP":
+                    
+                    start_exact = time.time()
+                    if algorithm_choice == "KMP": 
                         count = KMP(flat_text, keyword_pattern) 
-                    elif algorithm_choice == "BM":
+                    elif algorithm_choice == "BM": 
                         count = BM(flat_text, keyword_pattern)
-                    elif algorithm_choice == "Levenshtein":
-                        count, matched_words_for_this_keyword = \
-                            levenshteinSearchWithMatchedWords(flat_text, keyword_pattern, levenshtein_threshold)
+                    end_exact = time.time()
+                    total_exact_duration_s += (end_exact - start_exact)
 
                     if count > 0:
+                        has_exact_match = True # Tandai bahwa kita menemukan exact match
                         details_string = f"{keyword_pattern.capitalize()}: {count} occurrence{'s' if count > 1 else ''}"
-
-                        if algorithm_choice == "Levenshtein" and matched_words_for_this_keyword:
-                            unique_matched_display = sorted(list(set(matched_words_for_this_keyword)))
-                            details_string += f" (kata cocok: {', '.join(unique_matched_display)})"
-
                         current_cv_matched_keywords_details.append(details_string)
                         current_cv_total_matches += count
-                
+                    elif count == 0:
+                        start_fuzzy = time.time()
+                        fuzzy_count, matched_words = dynamicLevenshteinSearch(flat_text, keyword_pattern)
+                        end_fuzzy = time.time()
+                        total_fuzzy_duration_s += (end_fuzzy - start_fuzzy)
+                        
+                        if fuzzy_count > 0:
+                            details_string = f"{keyword_pattern.capitalize()} (fuzzy): {fuzzy_count} occurrence{'s' if fuzzy_count > 1 else ''}"
+                            if matched_words:
+                                unique_matched_display = sorted(list(set(matched_words)))
+                                details_string += f" (kata cocok: {', '.join(unique_matched_display)})"
+                            current_cv_matched_keywords_details.append(details_string)
+                            current_cv_total_matches += fuzzy_count
+                    
             if current_cv_total_matches > 0:
+                # Prioritas 1 untuk CV dengan exact match (akan muncul di atas)
+                # Prioritas 2 untuk CV yang hanya punya fuzzy match
+                match_priority = 1 if has_exact_match else 2
+
                 return {
-                    "id": applicant_id,
-                    "name": candidate_name, 
+                    "id": applicant_id, "name": candidate_name, 
                     "total_matches": current_cv_total_matches,
                     "matched_keywords": current_cv_matched_keywords_details, 
-                    "cv_path": cv_path_from_db
+                    "cv_path": cv_path_from_db,
+                    "exact_duration_s": total_exact_duration_s,
+                    "fuzzy_duration_s": total_fuzzy_duration_s,
+                    "match_priority": match_priority # Tambahkan label ke hasil
                 }
             return None
         except Exception as e:
@@ -211,13 +208,9 @@ class CVAnalyzerApp:
 
     def perform_search(self):
         keywords_str = self.keywords_entry.get()
-        search_algo = self.search_algo_var.get()
         algorithm = self.search_algo_var.get()
         use_encryption = self.use_encryption_var.get()
-        levenshtein_threshold = 0
-
-        if search_algo == "Levenshtein":
-            levenshtein_threshold = int(self.levenshtein_threshold_entry.get())
+        
         try:
             top_n = int(self.top_matches_spinbox.get())
         except ValueError:
@@ -237,6 +230,9 @@ class CVAnalyzerApp:
         conn = None
         num_cvs_from_db = 0
         start_time = time.time()
+        
+        total_exact_search_duration_s = 0.0
+        total_fuzzy_search_duration_s = 0.0
 
         main_aho_automaton = None
         if algorithm == "Aho-Corasick":
@@ -253,16 +249,11 @@ class CVAnalyzerApp:
             db_rows = cursor.fetchall()
             db_rows_decrypted = []
             for row in db_rows:
-                cv_path_value = row[0]
-                first_name_value = row[1]
-                last_name_value = row[2]
-                applicant_id_value = row[3]
+                cv_path_value, first_name_value, last_name_value, applicant_id_value = row
                 if use_encryption:
                     first_name_value = xor_decrypt_data(first_name_value, ENCRYPTION_KEY)
                     last_name_value = xor_decrypt_data(last_name_value, ENCRYPTION_KEY)
-                db_rows_decrypted.append(
-                    (cv_path_value, first_name_value, last_name_value, applicant_id_value)
-                )
+                db_rows_decrypted.append((cv_path_value, first_name_value, last_name_value, applicant_id_value))
             num_cvs_from_db = len(db_rows_decrypted)
 
             if not db_rows_decrypted:
@@ -273,58 +264,51 @@ class CVAnalyzerApp:
             
             num_workers = (os.cpu_count() or 2) * 2 
             
-            futures = []
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                for db_row_tuple in db_rows_decrypted:
-                    future = executor.submit(
-                        CVAnalyzerApp.process_cv_worker,
-                        db_row_tuple, 
-                        parsed_keywords, 
-                        algorithm,
-                        main_aho_automaton, # Akan None jika bukan Aho-Corasick
-                        levenshtein_threshold=levenshtein_threshold
-                    )
-                    futures.append(future)
+                futures = [executor.submit(CVAnalyzerApp.process_cv_worker, db_row, parsed_keywords, algorithm, main_aho_automaton) for db_row in db_rows_decrypted]
                 
-                for i, future_result in enumerate(as_completed(futures)):
+                for future_result in as_completed(futures):
                     try:
                         result = future_result.result() 
                         if result:
                             all_cv_results.append(result)
+                            total_exact_search_duration_s += result.get("exact_duration_s", 0)
+                            total_fuzzy_search_duration_s += result.get("fuzzy_duration_s", 0)
                     except Exception as e_thread:
                         print(f"Error retrieving result from a worker thread: {e_thread}")
             
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"MySQL Error: {err}")
-            if hasattr(self, 'scan_info_label'):
-                self.scan_info_label.config(text=f"Database connection failed.")
             return
         except Exception as e_main: 
             messagebox.showerror("Processing Error", f"An unexpected error occurred: {e_main}")
-            if hasattr(self, 'scan_info_label'):
-                self.scan_info_label.config(text=f"Processing error.")
-            print(f"Main thread processing error: {e_main}")
             return
         finally:
             if conn and conn.is_connected():
-                if 'cursor' in locals() and cursor: 
-                    cursor.close()
+                if 'cursor' in locals() and cursor: cursor.close()
                 conn.close()
 
-        all_cv_results.sort(key=lambda x: x["total_matches"], reverse=True)
+        all_cv_results.sort(key=lambda x: (x.get('match_priority', 2), -x['total_matches']))
         top_results_to_display = all_cv_results[:top_n]
         end_time = time.time()
-        processing_time = round((end_time - start_time) * 1000)
+        
+        total_processing_time_ms = round((end_time - start_time) * 1000)
+        total_exact_search_time_ms = round(total_exact_search_duration_s * 1000)
+        total_fuzzy_search_time_ms = round(total_fuzzy_search_duration_s * 1000)
 
         if hasattr(self, 'scan_info_label'):
-            self.scan_info_label.config(text=f"{num_cvs_from_db} CVs processed ({len(all_cv_results)} having matches). Took {processing_time}ms")
+            info_text = f"{num_cvs_from_db} CVs processed, found {len(all_cv_results)} matches. Total time: {total_processing_time_ms}ms"
+            
+            breakdown_text = f"\nBreakdown: Exact Time: {total_exact_search_time_ms}ms"
+            if total_fuzzy_search_time_ms > 0:
+                breakdown_text += f" | Fuzzy Time: {total_fuzzy_search_time_ms}ms"
+            info_text += breakdown_text
+            
+            self.scan_info_label.config(text=info_text)
             self.scan_info_label.pack(pady=(0,5)) 
+
         if hasattr(self, 'display_results'):
             self.display_results(top_results_to_display)
-        else:
-            print("Display results function not found.") # Fallback jika display_results tidak ada
-            print(top_results_to_display)
-
 
     def display_results(self, results_data):
         for widget in self.scrollable_card_frame.winfo_children():
@@ -353,8 +337,16 @@ class CVAnalyzerApp:
             name_label = ttk.Label(text_content_frame, text=result_item_data["name"], font=("Arial", 12, "bold"), background="#ffffff")
             name_label.pack(anchor="w", pady=(0,2))
 
-            matches_text = f"{result_item_data['total_matches']} match"
-            if result_item_data["total_matches"] != 1: matches_text += "es"
+            matches_count = result_item_data['total_matches']
+            priority = result_item_data.get('match_priority', 2)
+            
+            match_type_indicator = ""
+            if priority == 1:
+                match_type_indicator = "(Exact)"
+            elif priority == 2:
+                match_type_indicator = "(Fuzzy Only)"
+
+            matches_text = f"{matches_count} match{'es' if matches_count != 1 else ''} {match_type_indicator}"
             matches_label = ttk.Label(text_content_frame, text=matches_text, font=("Arial", 9, "italic"), background="#ffffff")
             matches_label.pack(anchor="w", pady=(0,5))
 
@@ -367,16 +359,15 @@ class CVAnalyzerApp:
             buttons_frame.pack(side="bottom", fill="x", pady=(10,0))
 
             summary_button = ttk.Button(buttons_frame, text="Summary", command=lambda data=result_item_data: self.view_summary(data), style="CardButton.TButton", width=10)
-            summary_button.pack(side="left", padx=(0,5)) # Summary di kiri
+            summary_button.pack(side="left", padx=(0,5))
 
             view_cv_button = ttk.Button(buttons_frame, text="View CV", command=lambda data=result_item_data: self.view_cv(data), style="CardButton.TButton", width=10)
-            view_cv_button.pack(side="right", padx=(5,0)) # View CV di kanan
+            view_cv_button.pack(side="right", padx=(5,0))
 
             ttk.Style().configure("CardButton.TButton", font=("Arial", 8))
         
         self.scrollable_card_frame.update_idletasks()
         self.on_frame_configure()
-
 
     def view_summary(self, result_data):
         cv_path_from_db = result_data.get('cv_path')

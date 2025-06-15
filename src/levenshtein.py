@@ -44,6 +44,28 @@ def levenshteinSearchWithMatchedWords(text: str, pattern: str, threshold: int = 
             matched_words.append(word) # Tambahkan kata yang cocok
     return count, matched_words
 
+def dynamicLevenshteinSearch(text: str, pattern: str, tolerance_percent: float = 0.15, max_edits: int = 2) -> tuple[int, list[str]]:
+    # Hitung ambang batas (allowed_edits) secara dinamis
+    patternLen = len(pattern)
+    if patternLen == 0:
+        return 0, []
+        
+    allowedEdits = min(math.ceil(tolerance_percent * patternLen), max_edits)
+
+    words = text.split()
+    count = 0
+    matched_words = []
+    
+    pattern_lower = pattern.lower()
+
+    for word in words:
+        # allowedEdits sebagai threshold dinamis
+        if levenshteinDistance(word.lower(), pattern_lower) <= allowedEdits:
+            count += 1
+            matched_words.append(word)
+            
+    return count, matched_words
+
 # def _process_chunk(chunk: list[str], pattern: str, threshold: int) -> int:
 #     local_count = 0
 #     for word in chunk:
