@@ -17,7 +17,7 @@ try:
     from ahocorasick import AhoCorasick
     from encrypt import xor_decrypt_data, get_profile_by_id, ENCRYPTION_KEY, get_db_connection
     from bm import BM
-    from levenshtein import levenshteinDistance, levenshteinSearchWithMatchedWords, dynamicLevenshteinSearch
+    from levenshtein import dynamicLevenshteinSearch
 except ImportError as e:
     messagebox.showerror("Import Error", f"Tidak dapat mengimpor modul yang dibutuhkan: {e}\nPastikan fileextract.py dan kmp.py ada.")
     sys.exit(1)
