@@ -68,6 +68,7 @@ python gui.py
 
 ## Author
 Me A Caveman Doesnt Have Religion
+
 | Nama | NIM |
 | Orvin Andika Ikhsan Abhista | 13523017 |
 | Ferdinand Gabetua Sinaga | 13523051 |
