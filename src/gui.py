@@ -351,10 +351,18 @@ class CVAnalyzerApp:
             matches_label.pack(anchor="w", pady=(0,5))
 
             ttk.Label(text_content_frame, text="Matched keywords:", font=("Arial", 9, "underline"), background="#ffffff").pack(anchor="w", pady=(5,2))
+
+            keywords_frame = ttk.Frame(text_content_frame, height=60, style="Card.TFrame")
+            keywords_frame.pack(fill="x", expand=False)
+            keywords_frame.pack_propagate(False)
+
             for idx, detail in enumerate(result_item_data["matched_keywords"]):
-                detail_label = ttk.Label(text_content_frame, text=f"{idx+1}. {detail}", font=("Arial", 9), background="#ffffff")
+                detail_label = ttk.Label(keywords_frame, text=f"{idx+1}. {detail}", font=("Arial", 9), background="#ffffff")
                 detail_label.pack(anchor="w")
             
+            spacer = ttk.Frame(text_content_frame, style="Card.TFrame")
+            spacer.pack(fill='both', expand=True)
+
             buttons_frame = ttk.Frame(card, style="Card.TFrame") 
             buttons_frame.pack(side="bottom", fill="x", pady=(10,0))
 
